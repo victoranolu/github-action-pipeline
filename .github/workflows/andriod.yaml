@@ -74,6 +74,14 @@ jobs:
       # Step above is optional if you want to be extra security tight. The JSON file is to a temporary file on the runner
       # after successful pipeline the file gets deleted.
 
+    
+    - id: auth
+      uses: google-github-actions/auth@v2
+      with:
+        workload_identity_provider: <project>/.../workloadIdentityPools/<provider>
+        service_account: <service-account>@<project>.iam.gserviceaccount.com
+    # this options is also good after doing everything in the read me file.
+    # this will authenticate your account  on google and get it efficient.
 
     - name: Upload to Google Play
       uses: r0adkll/upload-google-play@v1
