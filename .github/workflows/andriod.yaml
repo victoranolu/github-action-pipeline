@@ -1,0 +1,97 @@
+name: Deploy to Google Play
+
+on:   
+  push:
+    branches: [whatever-branch-you-want-to-push]
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    env:
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+
+     # The section above are the environment variables that has the parameters for the signed APK 
+     # This signs as proof of your authencity of the app. Designate a path to store the keys and password.
+     # Then head to the secrets and actions to create a repo secret. 
+     steps:
+    - name: Export Release Timestamp
+      run: echo "APP_VERSION=v$(date +'%Y.%m.%d.%H.%M.%S')" >> $GITHUB_ENV
+
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK 
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'zulu'   # Under the condition that it is the right distribution
+        java-version: '12.x'        # A java version would be specified
+      
+    - name: set up flutter
+      uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.22.2' #'3.7.11'
+        channel: 'stable'
+
+    - name: Generate .env file
+      run: |
+         echo "URL=https://devotional.bnportalng.com" >> .env
+
+    - run: flutter pub get
+    - run: |
+          echo $KEYSTORE_BASE64 | base64 -d > "$GITHUB_WORKSPACE/mobile_keystore.jks"
+          echo "storeFile=$GITHUB_WORKSPACE/mobile_keystore.jks" >> android/key.properties
+          echo "storePassword=${{ secrets.STORE_PASSWORD }}" >> android/key.properties
+          echo "keyPassword=${{ secrets.KEY_PASSWORD }}" >> android/key.properties
+          echo "keyAlias=${{ secrets.KEY_ALIAS }}" >> android/key.properties
+          
+    - name: Start Android Release Build
+      run: flutter build appbundle
+    
+    - name: Upload Android Release
+      uses: actions/upload-artifact@v3
+      with:
+        name: android-release
+        path: build/app/outputs/bundle/release/app-release.aab
+
+    - name: Start Apk Release Build
+      run: flutter build apk
+
+    - name: Upload Android Release
+      uses: actions/upload-artifact@v3
+      with:
+        name: release-apk
+        path: build/app/outputs/flutter-apk/app-release.apk
+
+    - name: Decrypt Google Play JSON Key
+      id: decrypt_secret
+      run: echo "${{ secrets.GOOGLE_PLAY_JSON_KEY }}" > /tmp/google-play-key.json 
+
+      # Step above is optional if you want to be extra security tight. The JSON file is to a temporary file on the runner
+      # after successful pipeline the file gets deleted.
+
+
+    - name: Upload to Google Play
+      uses: r0adkll/upload-google-play@v1
+      with:
+         serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_JSON_KEY }}  # you can use the tmp file created earlier in the previous step or just go directly.
+         packageName: ${{ secrets.PACKAGE_NAME }}
+         releaseFiles: build/app/outputs/bundle/release/app-release.aab    # right path for the aab file 
+         track: production
+         status: completed
+
+
+
+      # uses: swootte/upload-google-play@V1.1.5
+      # with:
+      #   serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_JSON_KEY }}
+      #   packageName: ${{ secrets.PACKAGE_NAME }}
+      #   releaseFiles: build/app/outputs/bundle/release/app-release.aab   
+      #   track: production
+      #   changesNotSentForReview: false or true (depending on use case)
+
+      # Commented out section is another uploader you can use
