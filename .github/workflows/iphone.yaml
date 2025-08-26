@@ -1,0 +1,133 @@
+name: App Store Deployment for iOS 
+on: 
+    push:
+        branches: [ prod ]        
+jobs:
+  build_and_test:
+    name: Build and Test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: 'stable'
+          
+      - name: Install dependencies
+        run: flutter pub get
+        
+      - name: Run tests
+        run: flutter test
+        
+      - name: Run analyzer
+        run: flutter analyze
+        
+      - name: Build iOS
+        run: flutter build ios --release --no-codesign
+
+  ios_deployment:
+    name: iOS App Store Deployment
+    needs: build_and_test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: 'stable'
+          
+      - name: Select Xcode version
+        run: sudo xcode-select -s /Applications/Xcode_${{ env.XCODE_VERSION }}.app
+          
+      - name: Install Apple certificates
+        uses: apple-actions/import-codesign-certs@v1
+        with:
+          p12-file-base64: ${{ secrets.P12_BASE64 }}
+          p12-password: ${{ secrets.P12_PASSWORD }}
+          keychain: build.keychain
+          keychain-password: ${{ secrets.KEYCHAIN_PASSWORD }}
+          
+      - name: Install provisioning profile
+        env:
+          PROVISIONING_PROFILE_BASE64: ${{ secrets.PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
+          echo -n "$PROVISIONING_PROFILE_BASE64" | base64 --decode > $PP_PATH
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles
+          
+      - name: Build IPA
+        run: |
+          cd ios
+          xcodebuild -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -archivePath $RUNNER_TEMP/Runner.xcarchive \
+            clean archive
+          xcodebuild -exportArchive \
+            -archivePath $RUNNER_TEMP/Runner.xcarchive \
+            -exportOptionsPlist exportOptions.plist \
+            -exportPath $RUNNER_TEMP/build
+            
+      - name: Upload to App Store
+        env:
+          APP_STORE_CONNECT_USERNAME: ${{ secrets.APP_STORE_CONNECT_USERNAME }}
+          APP_STORE_CONNECT_PASSWORD: ${{ secrets.APP_STORE_CONNECT_PASSWORD }}
+        uses: apple-actions/upload-testflight@v1
+        with:
+          app-path: ${{ runner.temp }}/build/Runner.ipa
+          issuer-id: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          api-key-id: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          api-private-key: ${{ secrets.APP_STORE_CONNECT_API_PRIVATE_KEY }}
+# jobs:
+#     build: 
+#         name: Build iOS Development
+#         runs-on: macos-latest
+#         env:
+#             MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+#             ASC_JSON_KEY: ${{ secrets.ASC_JSON_KEY }}
+#             MATCH_GIT_AUTH: ${{ secrets.MATCH_GIT_AUTH }}
+#             FASTLANE_APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+#         steps:
+#             - name: Checkout repository
+#               uses: actions/checkout@v1
+
+#             - name: Setup Flutter
+#               uses: subosito/flutter-action@v2
+#               with:
+#                 flutter-version: '3.7.11'
+#                 channel: 'stable'
+#                 cache: true
+#               id: flutter
+
+#             - name: Get Packages
+#               run: |
+#                 flutter pub get
+#                 flutter build ipa --release
+
+#             - name: Setup Fastlane
+#               uses: ruby/setup-ruby@v1
+#               with:
+#                 ruby-version: '3.3'
+#                 bundler-cache: true
+#                 working-directory: ios
+
+#             - name: Install Pod
+#               run: |
+#                 cd ios
+#                 pod install
+
+#             - name: Setup App Store Connect
+#               run: echo "$ASC_JSON_KEY" >> ./ios/fastlane/store.json
+
+#             - name: Build and Deploy to TestFlight
+#              run: |
+#                cd ./ios
+#                bundle exec fasylane ios beta
+
+
+              
